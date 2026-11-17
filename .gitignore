@@ -1,0 +1,7 @@
+node_modules/
+public/index.json
+public/icon-*.png
+test/
+ios/build/
+ios/*.xcodeproj/
+ios/Payload/
