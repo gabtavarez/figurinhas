@@ -29,6 +29,7 @@ function stickerUrl(r) {
 }
 
 let INDEX = [];
+const rowById = (id) => id && INDEX.find((r) => r[0] === id);
 const manifests = new Map(); // id -> Promise<pack>
 function getManifest(id, key) {
   if (!manifests.has(id)) {
@@ -46,14 +47,70 @@ function pump() { while (running < 6 && queue.length) { const [fn, res, rej] = q
 
 // ---------- explorar ----------
 const CHIPS = [
-  ['Destaques', '*'], ['Memes', 'meme'], ['Gatos', 'cat'], ['Cachorros', 'dog'], ['Anime', 'anime'],
+  ['Para você', '@foryou'], ['Surpresa', '@random'], ['Destaques', '*'], ['Memes', 'meme'], ['Gatos', 'cat'], ['Cachorros', 'dog'], ['Anime', 'anime'],
   ['Fofos', 'cute'], ['Amor', 'love'], ['Animais', 'animal'], ['Games', 'game'], ['Pokémon', 'pokemon'],
   ['Desenhos', 'cartoon'], ['Frases', 'text'], ['Comida', 'food'], ['Pixel', 'pixel'], ['Animadas', '@anim'],
 ];
-let current = []; let shown = 0; let activeChip = '*';
+let current = []; let shown = 0; let activeChip = '@foryou';
 const PAGE = 30;
 
+// ---------- recomendação ----------
+// gostos base + o que você abre/salva/favorita/copia (aprende sozinho, fica só no aparelho)
+const tokens = (row) => row[2].toLowerCase().split(/[\s,]+/).filter(Boolean);
+const CATS = {
+  anime: [3, 'anime manga kawaii chibi otaku waifu japan japanese аниме'],
+  funny: [3, 'funny meme memes lol humor reaction pepe sadpepe troll doge mood мем мемы смешные юмор'],
+  animals: [2.5, 'animal animals животные cat cats кот коты кошка dog dogs собака собаки fox лиса bear медведь rabbit bunny panda pig duck frog hamster capybara owl'],
+  cute: [1, 'cute милота emotions эмоции'],
+  avoid: [-4, 'hk hong kong hkg hongkong'],
+};
+const CAT_SETS = Object.fromEntries(Object.entries(CATS).map(([k, [w, words]]) => [k, [w, new Set(words.split(' '))]]));
+const catsOf = (row) => { const t = tokens(row); return Object.keys(CAT_SETS).filter((c) => t.some((x) => CAT_SETS[c][1].has(x))); };
+function learn(row, w) {
+  if (!row) return;
+  const t = store.get('taste', {});
+  for (const k of new Set(tokens(row))) t[k] = Math.min(12, (t[k] || 0) + w);
+  store.set('taste', t);
+  const seen = store.get('seen', []); if (!seen.includes(row[0])) { seen.push(row[0]); store.set('seen', seen.slice(-800)); }
+}
+function rng(seedStr) {
+  let h = 1779033703 ^ seedStr.length;
+  for (let i = 0; i < seedStr.length; i++) { h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+  return () => { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
+}
+const today = () => new Date().toISOString().slice(0, 10);
+function shuffled(rows, seed) {
+  const r = rng(seed), a = rows.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+function forYou() {
+  const taste = store.get('taste', {}), seen = new Set(store.get('seen', [])), r = rng('fy' + today());
+  const scored = INDEX.map((row) => {
+    let sc = 0;
+    for (const c of catsOf(row)) sc += CAT_SETS[c][0];
+    let learned = 0; for (const k of new Set(tokens(row))) learned += taste[k] || 0;
+    sc += Math.min(6, learned * 0.4);
+    if (row[3] & 2) sc += 1;            // escolha dos editores
+    if (seen.has(row[0])) sc -= 4;      // prioriza pacotes que você ainda não viu
+    return [sc + r() * 3, row];         // pitada de aleatório: muda todo dia
+  });
+  scored.sort((a, b) => b[0] - a[0]);
+  // diversidade: evita 3 pacotes seguidos do mesmo "tema principal"
+  const out = [], hold = [];
+  const theme = (row) => catsOf(row).find((c) => c !== 'cute' && c !== 'avoid') || 'x';
+  for (const [, row] of scored) {
+    const n = out.length;
+    if (n >= 2 && theme(out[n - 1]) === theme(row) && theme(out[n - 2]) === theme(row)) hold.push(row);
+    else { out.push(row); if (hold.length && theme(hold[0]) !== theme(row)) out.push(hold.shift()); }
+  }
+  return out.concat(hold);
+}
+let surpriseN = 0;
+
 function filterIndex(q) {
+  if (q === '@foryou') return forYou();
+  if (q === '@random') return shuffled(INDEX, 'rnd' + Date.now() + (surpriseN++));
   if (q === '*' || !q) return INDEX;
   if (q === '@anim') return INDEX.filter((r) => r[3] & 1);
   const terms = q.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/\s+/).filter(Boolean);
@@ -117,7 +174,7 @@ function packCard(p) {
 // ---------- pacote ----------
 let viewPack = null;
 async function openPack(p) {
-  viewPack = p;
+  viewPack = p; learn(p.row || rowById(p.id), 1);
   const v = $('#packView'); v.hidden = false; v.scrollTop = 0;
   $('#pvTitle').textContent = p.title || 'Carregando…'; $('#pvSub').textContent = '';
   const grid = $('#pvGrid'); grid.innerHTML = ''; $('#pvAdd').innerHTML = '';
@@ -172,6 +229,7 @@ function renderAddBar(p, refs) {
         tray: waUrl(cover, true),
         stickers: part.map((r) => ({ url: waUrl(r), emojis: r.emoji ? [...new Intl.Segmenter().segment(r.emoji)].map((x) => x.segment).slice(0, 3) : [] })),
       });
+      learn(p.row || rowById(p.id), 3);
       b.disabled = true; b.textContent = 'Preparando figurinhas…';
       setTimeout(() => { b.disabled = false; b.textContent = label; }, 8000);
     };
@@ -193,6 +251,7 @@ $('#pvSave').onclick = () => {
   if (list.some((x) => packId(x) === packId(p))) list = list.filter((x) => packId(x) !== packId(p));
   else list.unshift(p.src === 'sig' ? { src: 'sig', id: p.id, key: p.key, anim: p.anim, title: p.title } : { src: 'tg', name: p.name, title: p.title, stickers: p.stickers });
   store.set('packs', list); syncSaveBtn(); renderSaved();
+  learn(p.row || rowById(p.id), 3);
 };
 
 function stickerCell(r) {
@@ -235,6 +294,7 @@ $('#shCopy').onclick = async () => {
     // Safari exige que o ClipboardItem seja criado dentro do toque, com Promise
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })]);
     toast('Copiada! Cole no chat do WhatsApp');
+    learn(rowById(sheetRef.id), 1);
   } catch (e) {
     if (e.message === 'noclip') return share();
     toast('Não deu pra copiar — tente Compartilhar');
@@ -256,6 +316,7 @@ $('#shFav').onclick = () => {
   let l = favList(); const k = refKey(sheetRef);
   if (l.some((x) => refKey(x) === k)) l = l.filter((x) => refKey(x) !== k); else l.unshift(sheetRef);
   store.set('favs', l); syncFav(); renderSaved();
+  learn(rowById(sheetRef?.id), 2);
 };
 $('#shDel').onclick = async () => {
   if (sheetRef?.src !== 'own') return;
@@ -322,8 +383,8 @@ $('#q').addEventListener('input', () => {
   qT = setTimeout(() => {
     const q = $('#q').value.trim();
     switchTab('explore');
-    activeChip = q ? null : '*'; renderChips();
-    runList(filterIndex(q || '*'), q ? `“${q}”` : 'Destaques');
+    activeChip = q ? null : '@foryou'; renderChips();
+    runList(filterIndex(q || '@foryou'), q ? `“${q}”` : 'Para você');
   }, 220);
 });
 $('#q').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
@@ -345,5 +406,5 @@ document.querySelector('[data-close-install]').onclick = () => { $('#install').h
 
 // ---------- boot ----------
 renderChips();
-fetch('/index.json').then((r) => r.json()).then((rows) => { INDEX = rows; runList(INDEX, 'Destaques'); });
+fetch('/index.json').then((r) => r.json()).then((rows) => { INDEX = rows; runList(forYou(), 'Para você'); });
 renderOwn().then(renderSaved);
