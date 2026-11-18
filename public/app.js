@@ -21,10 +21,11 @@ const ownUrls = new Map();
 
 // ---------- modelo ----------
 // sticker ref: {src:'sig',id,key,s} | {src:'tg',f} | {src:'own',oid}
-const refKey = (r) => r.src === 'sig' ? `sig:${r.id}:${r.s}` : r.src === 'tg' ? `tg:${r.f}` : `own:${r.oid}`;
+const refKey = (r) => r.src === 'sig' ? `sig:${r.id}:${r.s}` : r.src === 'tg' ? `tg:${r.f}` : r.src === 'stly' ? `stly:${r.u}` : `own:${r.oid}`;
 function stickerUrl(r) {
   if (r.src === 'sig') return `/api/sticker?id=${r.id}&key=${r.key}&s=${r.s}`;
   if (r.src === 'tg') return `/api/tgfile?f=${encodeURIComponent(r.f)}`;
+  if (r.src === 'stly') return `/api/stfile?u=${encodeURIComponent(r.u)}`;
   return ownUrls.get(r.oid) || '';
 }
 
@@ -164,8 +165,8 @@ function packCard(p) {
       fill(m.title, m.stickers.length, stickerUrl({ src: 'sig', id: p.id, key: p.key, s: m.cover?.id ?? 0 }));
     }).catch(() => { t.textContent = 'Indisponível'; cov.classList.remove('sk'); });
     io.observe(card);
-  } else if (p.src === 'tg') {
-    fill(p.title, p.stickers.length, stickerUrl({ src: 'tg', f: p.stickers[0]?.f }));
+  } else if (p.src === 'tg' || p.src === 'stly') {
+    fill(p.title, p.stickers.length, stickerUrl(refOf(p, p.stickers[0] || {})));
   }
   card.onclick = () => openPack(p);
   return card;
@@ -190,8 +191,8 @@ async function openPack(p) {
       p.coverS = m.cover?.id ?? 0;
     } else {
       $('#pvTitle').textContent = p.title;
-      $('#pvSub').textContent = `${p.stickers.length} figurinhas · Telegram`;
-      refs = p.stickers.map((s) => ({ src: 'tg', f: s.f, emoji: s.emoji }));
+      $('#pvSub').textContent = `${p.stickers.length} figurinhas · ${p.src === 'stly' ? 'Sticker.ly' : 'Telegram'}`;
+      refs = p.stickers.map((s) => refOf(p, s));
     }
   } catch { $('#pvSub').textContent = 'Não consegui carregar este pacote.'; return; }
   if (viewPack !== p) return;
@@ -202,7 +203,7 @@ async function openPack(p) {
 // ---------- adicionar pacote inteiro (só no app iOS) ----------
 const NATIVE = !!(window.FIG_NATIVE && window.webkit?.messageHandlers?.wa);
 function waUrl(r, tray) {
-  const q = r.src === 'sig' ? `src=sig&id=${r.id}&key=${r.key}&s=${r.s}` : `src=tg&f=${encodeURIComponent(r.f)}`;
+  const q = r.src === 'sig' ? `src=sig&id=${r.id}&key=${r.key}&s=${r.s}` : r.src === 'stly' ? `src=stly&u=${encodeURIComponent(r.u)}` : `src=tg&f=${encodeURIComponent(r.f)}`;
   return `${location.origin}/api/wa?${q}${tray ? '&tray=1' : ''}`;
 }
 function splitParts(list) {
@@ -215,7 +216,7 @@ function renderAddBar(p, refs) {
   if (refs.length < 3) { bar.append(el('p', 'hint', 'O WhatsApp exige pelo menos 3 figurinhas por pacote.')); return; }
   if (!NATIVE) { bar.append(el('p', 'hint', 'Para adicionar o pacote inteiro de uma vez, use o app Figurinhas para iPhone. Aqui no Safari: toque numa figurinha → Copiar.')); return; }
   const parts = splitParts(refs);
-  const baseId = p.src === 'sig' ? 'sig_' + p.id : 'tg_' + p.name;
+  const baseId = p.src === 'sig' ? 'sig_' + p.id : p.src + '_' + p.name;
   parts.forEach((part, i) => {
     const label = parts.length > 1 ? `Adicionar ao WhatsApp · parte ${i + 1}/${parts.length}` : 'Adicionar ao WhatsApp';
     const b = el('button', 'addwa', label);
@@ -240,7 +241,8 @@ window.__waStatus = (ok, msg) => toast(msg);
 function closePack() { $('#packView').hidden = true; viewPack = null; }
 $('#backBtn').onclick = () => history.back();
 
-function packId(p) { return p.src === 'sig' ? 'sig:' + p.id : 'tg:' + p.name; }
+function packId(p) { return p.src === 'sig' ? 'sig:' + p.id : p.src + ':' + p.name; }
+const refOf = (p, s) => p.src === 'stly' ? { src: 'stly', u: s.u, emoji: s.emoji } : { src: 'tg', f: s.f, emoji: s.emoji };
 function syncSaveBtn() {
   const saved = store.get('packs', []).some((x) => packId(x) === packId(viewPack));
   const b = $('#pvSave'); b.textContent = saved ? 'Salvo ✓' : 'Salvar'; b.classList.toggle('on', saved);
@@ -249,7 +251,7 @@ $('#pvSave').onclick = () => {
   const p = viewPack; if (!p) return;
   let list = store.get('packs', []);
   if (list.some((x) => packId(x) === packId(p))) list = list.filter((x) => packId(x) !== packId(p));
-  else list.unshift(p.src === 'sig' ? { src: 'sig', id: p.id, key: p.key, anim: p.anim, title: p.title } : { src: 'tg', name: p.name, title: p.title, stickers: p.stickers });
+  else list.unshift(p.src === 'sig' ? { src: 'sig', id: p.id, key: p.key, anim: p.anim, title: p.title } : { src: p.src, name: p.name, title: p.title, stickers: p.stickers });
   store.set('packs', list); syncSaveBtn(); renderSaved();
   learn(p.row || rowById(p.id), 3);
 };
@@ -361,20 +363,21 @@ $('#upload').onchange = async (e) => {
   await renderOwn(); toast(`${n} figurinha(s) criada(s)`);
 };
 
-$('#tgForm').onsubmit = async (e) => {
-  e.preventDefault();
-  const v = $('#tgInput').value.trim(); if (!v) return;
+async function importLink(v) {
   const msg = $('#tgMsg'); msg.textContent = 'Buscando…';
+  const isStly = /sticker\.ly/i.test(v);
   try {
-    const r = await fetch('/api/tg?name=' + encodeURIComponent(v)); const j = await r.json();
+    const r = await fetch((isStly ? '/api/stly?link=' : '/api/tg?name=') + encodeURIComponent(v)); const j = await r.json();
     if (!r.ok) throw new Error(j.error);
     if (!j.stickers.length) throw new Error('Esse pacote só tem figurinhas animadas/vídeo (ainda não suportado).');
     msg.textContent = `“${j.title}”: ${j.stickers.length} figurinhas` + (j.skipped ? ` (${j.skipped} animadas ignoradas)` : '');
-    const p = { src: 'tg', name: j.name, title: j.title, stickers: j.stickers };
+    const p = { src: isStly ? 'stly' : 'tg', name: j.name, title: j.title, stickers: j.stickers };
     const list = store.get('packs', []).filter((x) => packId(x) !== packId(p)); list.unshift(p); store.set('packs', list);
     renderSaved(); openPack(p); $('#tgInput').value = '';
-  } catch (err) { msg.textContent = err.message || 'Erro'; }
-};
+    toast('Pacote importado e salvo');
+  } catch (err) { msg.textContent = err.message || 'Erro'; toast(err.message || 'Erro ao importar'); }
+}
+$('#tgForm').onsubmit = (e) => { e.preventDefault(); const v = $('#tgInput').value.trim(); if (v) importLink(v); };
 
 // ---------- busca ----------
 let qT;
@@ -382,6 +385,7 @@ $('#q').addEventListener('input', () => {
   clearTimeout(qT);
   qT = setTimeout(() => {
     const q = $('#q').value.trim();
+    if (/sticker\.ly\/s\/|t\.me\/addstickers\//i.test(q)) { $('#q').value = ''; importLink(q); return; }
     switchTab('explore');
     activeChip = q ? null : '@foryou'; renderChips();
     runList(filterIndex(q || '@foryou'), q ? `“${q}”` : 'Para você');
