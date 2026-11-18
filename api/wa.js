@@ -3,6 +3,7 @@
 import sharp from 'sharp';
 import { validIds, getSticker } from './_signal.js';
 import { validFileId, getTgFile } from './_tg.js';
+import { videoToWaWebp, videoFirstFrame } from './_video.js';
 
 const CLEAR = { r: 0, g: 0, b: 0, alpha: 0 };
 const MAX_STICKER = 100 * 1024;
@@ -41,7 +42,10 @@ export default async function handler(req, res) {
   try {
     const src = await loadSource(req.query);
     const tray = req.query.tray === '1';
-    const out = tray ? await toWaTray(src) : await toWaSticker(src);
+    const video = req.query.v === '1';
+    let out;
+    if (video) out = tray ? await toWaTray(await videoFirstFrame(src)) : await videoToWaWebp(src);
+    else out = tray ? await toWaTray(src) : await toWaSticker(src);
     res.setHeader('Content-Type', tray ? 'image/png' : 'image/webp');
     res.setHeader('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');
     res.status(200).send(out);

@@ -24,7 +24,7 @@ const ownUrls = new Map();
 const refKey = (r) => r.src === 'sig' ? `sig:${r.id}:${r.s}` : r.src === 'tg' ? `tg:${r.f}` : r.src === 'stly' ? `stly:${r.u}` : `own:${r.oid}`;
 function stickerUrl(r) {
   if (r.src === 'sig') return `/api/sticker?id=${r.id}&key=${r.key}&s=${r.s}`;
-  if (r.src === 'tg') return `/api/tgfile?f=${encodeURIComponent(r.f)}`;
+  if (r.src === 'tg') return r.v ? `/api/wa?src=tg&f=${encodeURIComponent(r.f)}&v=1` : `/api/tgfile?f=${encodeURIComponent(r.f)}`;
   if (r.src === 'stly') return r.u; // baixado direto pelo aparelho
   return ownUrls.get(r.oid) || '';
 }
@@ -204,7 +204,7 @@ async function openPack(p) {
 const NATIVE = !!(window.FIG_NATIVE && window.webkit?.messageHandlers?.wa);
 function waUrl(r, tray) {
   if (r.src === 'stly') return r.u;
-  const q = r.src === 'sig' ? `src=sig&id=${r.id}&key=${r.key}&s=${r.s}` : `src=tg&f=${encodeURIComponent(r.f)}`;
+  const q = r.src === 'sig' ? `src=sig&id=${r.id}&key=${r.key}&s=${r.s}` : `src=tg&f=${encodeURIComponent(r.f)}${r.v ? '&v=1' : ''}`;
   return `${location.origin}/api/wa?${q}${tray ? '&tray=1' : ''}`;
 }
 function splitParts(list) {
@@ -230,6 +230,7 @@ function renderAddBar(p, refs) {
         publisher: 'Figurinhas',
         tray: waUrl(cover, true),
         raw: p.src === 'stly',
+        animated: !!(p.anim && p.src === 'tg'),
         stickers: part.map((r) => ({ url: waUrl(r), emojis: r.emoji ? [...new Intl.Segmenter().segment(r.emoji)].map((x) => x.segment).slice(0, 3) : [] })),
       });
       learn(p.row || rowById(p.id), 3);
@@ -244,7 +245,7 @@ function closePack() { $('#packView').hidden = true; viewPack = null; }
 $('#backBtn').onclick = () => history.back();
 
 function packId(p) { return p.src === 'sig' ? 'sig:' + p.id : p.src + ':' + p.name; }
-const refOf = (p, s) => p.src === 'stly' ? { src: 'stly', u: s.u, emoji: s.emoji } : { src: 'tg', f: s.f, emoji: s.emoji };
+const refOf = (p, s) => p.src === 'stly' ? { src: 'stly', u: s.u, emoji: s.emoji } : { src: 'tg', f: s.f, emoji: s.emoji, v: s.v };
 function syncSaveBtn() {
   const saved = store.get('packs', []).some((x) => packId(x) === packId(viewPack));
   const b = $('#pvSave'); b.textContent = saved ? 'Salvo ✓' : 'Salvar'; b.classList.toggle('on', saved);
@@ -253,7 +254,7 @@ $('#pvSave').onclick = () => {
   const p = viewPack; if (!p) return;
   let list = store.get('packs', []);
   if (list.some((x) => packId(x) === packId(p))) list = list.filter((x) => packId(x) !== packId(p));
-  else list.unshift(p.src === 'sig' ? { src: 'sig', id: p.id, key: p.key, anim: p.anim, title: p.title } : { src: p.src, name: p.name, title: p.title, stickers: p.stickers });
+  else list.unshift(p.src === 'sig' ? { src: 'sig', id: p.id, key: p.key, anim: p.anim, title: p.title } : { src: p.src, name: p.name, title: p.title, anim: p.anim, stickers: p.stickers });
   store.set('packs', list); syncSaveBtn(); renderSaved();
   learn(p.row || rowById(p.id), 3);
 };
@@ -376,9 +377,9 @@ async function importLink(v) {
   try {
     const r = await fetch((isStly ? '/api/stly?link=' : '/api/tg?name=') + encodeURIComponent(v)); const j = await r.json();
     if (!r.ok) throw new Error(j.error);
-    if (!j.stickers.length) throw new Error('Esse pacote só tem figurinhas animadas/vídeo (ainda não suportado).');
-    msg.textContent = `“${j.title}”: ${j.stickers.length} figurinhas` + (j.skipped ? ` (${j.skipped} animadas ignoradas)` : '');
-    const p = { src: isStly ? 'stly' : 'tg', name: j.name, title: j.title, stickers: j.stickers };
+    if (!j.stickers.length) throw new Error('Esse pacote só tem figurinhas animadas do tipo Lottie, que o WhatsApp não aceita. Pacotes de vídeo e estáticos funcionam.');
+    msg.textContent = `“${j.title}”: ${j.stickers.length} figurinhas${j.animated ? ' animadas' : ''}` + (j.skipped ? ` (${j.skipped} ignoradas)` : '');
+    const p = { src: isStly ? 'stly' : 'tg', name: j.name, title: j.title, anim: j.animated ? 1 : 0, stickers: j.stickers };
     const list = store.get('packs', []).filter((x) => packId(x) !== packId(p)); list.unshift(p); store.set('packs', list);
     renderSaved(); openPack(p); $('#tgInput').value = '';
     toast('Pacote importado e salvo');

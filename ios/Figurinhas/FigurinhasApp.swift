@@ -138,15 +138,13 @@ final class WhatsAppBridge: NSObject, WKScriptMessageHandler {
                 }
                 for try await (i, data) in group { images[i] = data }
             }
-            let animated = raw && images.compactMap { $0 }.contains { isAnimatedWebP($0) }
+            let animated = ((p["animated"] as? Bool) ?? false) || images.compactMap { $0 }.contains { isAnimatedWebP($0) }
             var stickers: [[String: Any]] = []
             for (i, item) in items.enumerated() {
                 guard let data = images[i] else { continue }
-                if raw {
-                    // WhatsApp: estático <= 100 KB, animado <= 500 KB, nunca misturado
-                    if isAnimatedWebP(data) != animated { continue }
-                    if data.count > (animated ? 500 : 100) * 1024 { continue }
-                }
+                // WhatsApp: estático <= 100 KB, animado <= 500 KB, nunca misturado
+                if isAnimatedWebP(data) != animated { continue }
+                if data.count > (animated ? 500 : 100) * 1024 { continue }
                 let emojis = Array(((item["emojis"] as? [String]) ?? []).prefix(3))
                 stickers.append(["image_data": data.base64EncodedString(), "emojis": emojis])
             }

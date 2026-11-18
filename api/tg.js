@@ -11,11 +11,12 @@ export default async function handler(req, res) {
     const j = await r.json();
     if (!j.ok) return res.status(404).json({ error: 'Pacote não encontrado' });
     const all = j.result.stickers;
-    const stickers = all
-      .filter((s) => !s.is_animated && !s.is_video)
-      .map((s) => ({ f: s.file_id, emoji: s.emoji || '' }));
+    const stat = all.filter((s) => !s.is_animated && !s.is_video).map((s) => ({ f: s.file_id, emoji: s.emoji || '' }));
+    const vid = all.filter((s) => s.is_video).map((s) => ({ f: s.file_id, emoji: s.emoji || '', v: 1 }));
+    // WhatsApp não mistura estático com animado: fica o grupo maior
+    const stickers = vid.length > stat.length ? vid : stat;
     res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
-    res.status(200).json({ name, title: j.result.title, stickers, skipped: all.length - stickers.length });
+    res.status(200).json({ name, title: j.result.title, animated: stickers === vid && vid.length > 0, stickers, skipped: all.length - stickers.length });
   } catch (e) {
     res.status(502).json({ error: 'Falha ao falar com o Telegram' });
   }
