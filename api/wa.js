@@ -3,14 +3,12 @@
 import sharp from 'sharp';
 import { validIds, getSticker } from './_signal.js';
 import { validFileId, getTgFile } from './_tg.js';
-import { getStlyImage } from './_stly.js';
 
 const CLEAR = { r: 0, g: 0, b: 0, alpha: 0 };
 const MAX_STICKER = 100 * 1024;
 const MAX_TRAY = 50 * 1024;
 
 async function loadSource(q) {
-  if (q.src === 'stly') return getStlyImage(String(q.u || ''));
   if (q.src === 'tg') {
     if (!validFileId(q.f)) throw Object.assign(new Error('bad'), { status: 400 });
     return getTgFile(q.f);

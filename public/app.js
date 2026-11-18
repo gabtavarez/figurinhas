@@ -25,7 +25,7 @@ const refKey = (r) => r.src === 'sig' ? `sig:${r.id}:${r.s}` : r.src === 'tg' ? 
 function stickerUrl(r) {
   if (r.src === 'sig') return `/api/sticker?id=${r.id}&key=${r.key}&s=${r.s}`;
   if (r.src === 'tg') return `/api/tgfile?f=${encodeURIComponent(r.f)}`;
-  if (r.src === 'stly') return `/api/stfile?u=${encodeURIComponent(r.u)}`;
+  if (r.src === 'stly') return r.u; // baixado direto pelo aparelho
   return ownUrls.get(r.oid) || '';
 }
 
@@ -203,7 +203,8 @@ async function openPack(p) {
 // ---------- adicionar pacote inteiro (só no app iOS) ----------
 const NATIVE = !!(window.FIG_NATIVE && window.webkit?.messageHandlers?.wa);
 function waUrl(r, tray) {
-  const q = r.src === 'sig' ? `src=sig&id=${r.id}&key=${r.key}&s=${r.s}` : r.src === 'stly' ? `src=stly&u=${encodeURIComponent(r.u)}` : `src=tg&f=${encodeURIComponent(r.f)}`;
+  if (r.src === 'stly') return r.u;
+  const q = r.src === 'sig' ? `src=sig&id=${r.id}&key=${r.key}&s=${r.s}` : `src=tg&f=${encodeURIComponent(r.f)}`;
   return `${location.origin}/api/wa?${q}${tray ? '&tray=1' : ''}`;
 }
 function splitParts(list) {
@@ -228,6 +229,7 @@ function renderAddBar(p, refs) {
         name: name.slice(0, 120),
         publisher: 'Figurinhas',
         tray: waUrl(cover, true),
+        raw: p.src === 'stly',
         stickers: part.map((r) => ({ url: waUrl(r), emojis: r.emoji ? [...new Intl.Segmenter().segment(r.emoji)].map((x) => x.segment).slice(0, 3) : [] })),
       });
       learn(p.row || rowById(p.id), 3);
@@ -291,6 +293,9 @@ $('#sheetBg').onclick = closeSheet;
 
 $('#shCopy').onclick = async () => {
   if (!sheetRef) return;
+  if (sheetRef.src === 'stly') {
+    if (NATIVE && window.webkit.messageHandlers.copy) { window.webkit.messageHandlers.copy.postMessage({ url: sheetRef.u }); return; }
+  }
   try {
     if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('noclip');
     // Safari exige que o ClipboardItem seja criado dentro do toque, com Promise
