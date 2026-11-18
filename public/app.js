@@ -369,8 +369,10 @@ $('#upload').onchange = async (e) => {
 };
 
 async function importLink(v) {
-  const msg = $('#tgMsg'); msg.textContent = 'Buscando…';
-  const isStly = /sticker\.ly/i.test(v);
+  const msg = $('#tgMsg');
+  if (/sticker\.ly/i.test(v)) { msg.textContent = 'O Sticker.ly bloqueia o download das figurinhas fora do app deles, então não dá pra importar de lá.'; toast('Sticker.ly não permite importar'); return; }
+  msg.textContent = 'Buscando…';
+  const isStly = false;
   try {
     const r = await fetch((isStly ? '/api/stly?link=' : '/api/tg?name=') + encodeURIComponent(v)); const j = await r.json();
     if (!r.ok) throw new Error(j.error);
@@ -414,6 +416,7 @@ if (!standalone && !store.get('installDismissed', false)) $('#install').hidden =
 document.querySelector('[data-close-install]').onclick = () => { $('#install').hidden = true; store.set('installDismissed', true); };
 
 // ---------- boot ----------
+store.set('packs', store.get('packs', []).filter((p) => p.src !== 'stly'));
 renderChips();
 fetch('/index.json').then((r) => r.json()).then((rows) => { INDEX = rows; runList(forYou(), 'Para você'); });
 renderOwn().then(renderSaved);
